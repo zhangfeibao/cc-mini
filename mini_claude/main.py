@@ -8,6 +8,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from rich.console import Console
 
+from .config import load_app_config
 from .context import build_system_prompt
 from .engine import Engine
 from .permissions import PermissionChecker
@@ -61,12 +62,31 @@ def main() -> None:
                         help="Non-interactive: print response and exit")
     parser.add_argument("--auto-approve", action="store_true",
                         help="Auto-approve all tool permissions (dangerous)")
+    parser.add_argument("--config", help="Path to a TOML config file")
+    parser.add_argument("--api-key", help="Anthropic API key")
+    parser.add_argument("--base-url", help="Anthropic-compatible API base URL")
+    parser.add_argument("--model", help="Model name, e.g. claude-sonnet-4")
+    parser.add_argument("--max-tokens", type=int,
+                        help="Maximum output tokens for each model response")
     args = parser.parse_args()
+
+    try:
+        app_config = load_app_config(args)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     tools = [FileReadTool(), GlobTool(), GrepTool(), FileEditTool(), BashTool()]
     system_prompt = build_system_prompt()
     permissions = PermissionChecker(auto_approve=args.auto_approve)
-    engine = Engine(tools=tools, system_prompt=system_prompt, permission_checker=permissions)
+    engine = Engine(
+        tools=tools,
+        system_prompt=system_prompt,
+        permission_checker=permissions,
+        api_key=app_config.api_key,
+        base_url=app_config.base_url,
+        model=app_config.model,
+        max_tokens=app_config.max_tokens,
+    )
 
     # Non-interactive / piped
     if args.print or args.prompt:
@@ -75,7 +95,9 @@ def main() -> None:
         return
 
     # Interactive REPL
+    config_note = f"[dim]{app_config.model} · max_tokens={app_config.max_tokens}[/dim]"
     console.print("[bold cyan]Mini Claude Code[/bold cyan]  "
+                  f"{config_note}  "
                   "[dim]type 'exit' or Ctrl+C to quit[/dim]\n")
     session: PromptSession = PromptSession(history=FileHistory(str(_HISTORY_FILE)))
 

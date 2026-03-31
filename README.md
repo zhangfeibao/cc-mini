@@ -30,6 +30,19 @@ pip install -e ".[dev]"
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
+You can also set a custom API base URL, which is useful when targeting a proxy or an Anthropic-compatible endpoint:
+
+```bash
+export ANTHROPIC_BASE_URL=https://your-gateway.example.com
+```
+
+Optional environment variables for runtime defaults:
+
+```bash
+export MINI_CLAUDE_MODEL=claude-sonnet-4-5
+export MINI_CLAUDE_MAX_TOKENS=64000
+```
+
 ### Interactive REPL
 
 ```bash
@@ -78,6 +91,48 @@ Skip permission prompts for all tools (use with care):
 
 ```bash
 python3 -m mini_claude.main --auto-approve
+```
+
+### Configure API endpoint and model from CLI
+
+```bash
+python3 -m mini_claude.main \
+  --base-url https://your-gateway.example.com \
+  --api-key sk-ant-... \
+  --model claude-sonnet-4
+```
+
+`max_tokens` now follows the selected model by default. Override it only when you need a tighter cap:
+
+```bash
+python3 -m mini_claude.main --model claude-3-5-haiku --max-tokens 2048
+```
+
+### Configure with a TOML file
+
+Mini Claude looks for config files in these locations, in order:
+
+1. `~/.config/mini-claude/config.toml`
+2. `.mini-claude.toml` in the current working directory
+
+The project-local file overrides the home config. You can also point to a specific file with `--config`.
+
+Example:
+
+```toml
+[anthropic]
+api_key = "sk-ant-..."
+base_url = "https://your-gateway.example.com"
+model = "claude-sonnet-4"
+```
+
+Top-level keys are also supported:
+
+```toml
+api_key = "sk-ant-..."
+base_url = "https://your-gateway.example.com"
+model = "claude-3-7-sonnet"
+max_tokens = 64000
 ```
 
 ## Tools

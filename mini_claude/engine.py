@@ -1,17 +1,21 @@
 from __future__ import annotations
 from typing import Iterator
 import anthropic
+from .config import DEFAULT_MODEL, default_max_tokens_for_model, resolve_model
 from .tools.base import Tool, ToolResult
 from .permissions import PermissionChecker
-
-_MODEL = "claude-opus-4-5"
-_MAX_TOKENS = 8096
 
 
 class Engine:
     def __init__(self, tools: list[Tool], system_prompt: str,
-                 permission_checker: PermissionChecker):
-        self._client = anthropic.Anthropic()
+                 permission_checker: PermissionChecker,
+                 model: str = DEFAULT_MODEL,
+                 max_tokens: int | None = None,
+                 api_key: str | None = None,
+                 base_url: str | None = None):
+        self._model = resolve_model(model)
+        self._max_tokens = max_tokens or default_max_tokens_for_model(self._model)
+        self._client = anthropic.Anthropic(api_key=api_key, base_url=base_url)
         self._tools = {t.name: t for t in tools}
         self._system_prompt = system_prompt
         self._permissions = permission_checker
@@ -30,8 +34,8 @@ class Engine:
             tool_uses = []
 
             with self._client.messages.stream(
-                model=_MODEL,
-                max_tokens=_MAX_TOKENS,
+                model=self._model,
+                max_tokens=self._max_tokens,
                 system=self._system_prompt,
                 tools=[t.to_api_schema() for t in self._tools.values()],
                 messages=self._messages,

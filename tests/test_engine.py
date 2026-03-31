@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock, patch
 from mini_claude.engine import Engine
+from mini_claude.config import default_max_tokens_for_model
 from mini_claude.tools.base import Tool, ToolResult
 from mini_claude.permissions import PermissionChecker
 
@@ -106,3 +107,18 @@ def test_engine_unknown_tool_returns_error():
     tool_result_events = [e for e in events if e[0] == "tool_result"]
     assert tool_result_events[0][3].is_error
     assert "Unknown tool" in tool_result_events[0][3].content
+
+
+def test_engine_uses_model_specific_default_max_tokens():
+    engine = Engine(
+        tools=[EchoTool()],
+        system_prompt="You are a test assistant.",
+        permission_checker=PermissionChecker(auto_approve=True),
+        model="claude-sonnet-4",
+    )
+
+    with patch.object(engine._client.messages, "stream", return_value=_make_text_response("hello")) as stream:
+        list(engine.submit("hi"))
+
+    assert stream.call_args.kwargs["model"] == "claude-sonnet-4"
+    assert stream.call_args.kwargs["max_tokens"] == default_max_tokens_for_model("claude-sonnet-4")
