@@ -122,3 +122,41 @@ def test_engine_uses_model_specific_default_max_tokens():
 
     assert stream.call_args.kwargs["model"] == "claude-sonnet-4"
     assert stream.call_args.kwargs["max_tokens"] == default_max_tokens_for_model("claude-sonnet-4")
+
+
+def test_engine_normalizes_assistant_tool_use_blocks_before_retrying():
+    engine = _make_engine()
+    streams = _make_tool_then_text_response("Echo", {"message": "world"}, "tu_1", "done")
+
+    with patch.object(engine._client.messages, "stream", side_effect=streams) as stream:
+        list(engine.submit("use the echo tool"))
+
+    second_messages = stream.call_args_list[1].kwargs["messages"]
+    assistant_message = second_messages[1]
+    assistant_block = assistant_message["content"][0]
+
+    assert isinstance(assistant_block, dict)
+    assert assistant_block == {
+        "type": "tool_use",
+        "id": "tu_1",
+        "name": "Echo",
+        "input": {"message": "world"},
+    }
+
+
+def test_engine_normalizes_tool_result_blocks_before_follow_up_request():
+    engine = _make_engine()
+    streams = _make_tool_then_text_response("Echo", {"message": "world"}, "tu_1", "done")
+
+    with patch.object(engine._client.messages, "stream", side_effect=streams) as stream:
+        list(engine.submit("use the echo tool"))
+
+    second_messages = stream.call_args_list[1].kwargs["messages"]
+    tool_result_message = second_messages[2]
+
+    assert tool_result_message["content"] == [{
+        "type": "tool_result",
+        "tool_use_id": "tu_1",
+        "content": "Echo: world",
+        "is_error": False,
+    }]

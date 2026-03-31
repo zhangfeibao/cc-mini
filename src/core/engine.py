@@ -1,6 +1,6 @@
 from __future__ import annotations
 import time
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING, Any, Iterator
 import anthropic
 from .config import DEFAULT_MODEL, default_max_tokens_for_model, resolve_model
 from .tools.base import Tool, ToolResult
@@ -15,6 +15,84 @@ _RETRY_BACKOFF = (1, 3, 10)
 
 class AbortedError(Exception):
     """Raised when the current turn is aborted by the user (Esc / Ctrl+C)."""
+
+
+def _normalize_content_block(block: Any) -> dict[str, Any]:
+    """Convert SDK content blocks into plain API dictionaries.
+
+    Anthropic-compatible backends can reject SDK-specific object fields that
+    are harmless against Anthropic's own endpoint, so only persist the wire
+    fields we actually want to send back.
+    """
+    if isinstance(block, dict):
+        normalized = dict(block)
+    else:
+        normalized = {}
+        for field in (
+            "type", "text", "id", "name", "input", "tool_use_id",
+            "content", "is_error", "source",
+        ):
+            if hasattr(block, field):
+                normalized[field] = getattr(block, field)
+
+    block_type = normalized.get("type")
+    if block_type == "text":
+        return {"type": "text", "text": normalized.get("text", "")}
+    if block_type == "tool_use":
+        return {
+            "type": "tool_use",
+            "id": normalized.get("id", ""),
+            "name": normalized.get("name", ""),
+            "input": _normalize_json_value(normalized.get("input", {})),
+        }
+    if block_type == "tool_result":
+        result = {
+            "type": "tool_result",
+            "tool_use_id": normalized.get("tool_use_id", ""),
+            "content": _normalize_json_value(normalized.get("content", "")),
+        }
+        if "is_error" in normalized:
+            result["is_error"] = bool(normalized["is_error"])
+        return result
+    if block_type == "image":
+        return {
+            "type": "image",
+            "source": _normalize_json_value(normalized.get("source", {})),
+        }
+    return {
+        key: _normalize_json_value(value)
+        for key, value in normalized.items()
+        if value is not None
+    }
+
+
+def _normalize_json_value(value: Any) -> Any:
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, dict):
+        return {str(k): _normalize_json_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_normalize_json_value(item) for item in value]
+    if hasattr(value, "model_dump"):
+        return _normalize_json_value(value.model_dump())
+    if hasattr(value, "dict"):
+        return _normalize_json_value(value.dict())
+    if hasattr(value, "__dict__"):
+        data = {
+            key: val for key, val in vars(value).items()
+            if not key.startswith("_") and not callable(val)
+        }
+        if data:
+            return _normalize_json_value(data)
+    return value
+
+
+def _normalize_message_content(content: Any) -> Any:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return [_normalize_content_block(block) for block in content]
+    return _normalize_json_value(content)
 
 
 class Engine:
@@ -42,7 +120,13 @@ class Engine:
         return list(self._messages)
 
     def set_messages(self, messages: list[dict]) -> None:
-        self._messages = messages
+        self._messages = [
+            {
+                "role": message["role"],
+                "content": _normalize_message_content(message.get("content", "")),
+            }
+            for message in messages
+        ]
 
     def get_system_prompt(self) -> str:
         return self._system_prompt
@@ -109,7 +193,10 @@ class Engine:
           AbortedError — if abort() was called (by Esc listener or Ctrl+C)
         """
         self._aborted = False
-        self._messages.append({"role": "user", "content": user_input})
+        self._messages.append({
+            "role": "user",
+            "content": _normalize_message_content(user_input),
+        })
         self._persist(self._messages[-1])
 
         try:
@@ -180,7 +267,10 @@ class Engine:
                     self._messages.pop()
                     return
 
-                self._messages.append({"role": "assistant", "content": final.content})
+                self._messages.append({
+                    "role": "assistant",
+                    "content": _normalize_message_content(final.content),
+                })
                 self._persist(self._messages[-1])
 
                 if not tool_uses:
@@ -200,7 +290,10 @@ class Engine:
                         "is_error": result.is_error,
                     })
 
-                self._messages.append({"role": "user", "content": tool_results})
+                self._messages.append({
+                    "role": "user",
+                    "content": _normalize_message_content(tool_results),
+                })
                 self._persist(self._messages[-1])
         except AbortedError:
             self.cancel_turn()
