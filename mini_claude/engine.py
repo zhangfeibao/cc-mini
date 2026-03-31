@@ -6,6 +6,10 @@ from .tools.base import Tool, ToolResult
 from .permissions import PermissionChecker
 
 
+class AbortedError(Exception):
+    """Raised when the current turn is aborted by the user (Esc / Ctrl+C)."""
+
+
 class Engine:
     def __init__(self, tools: list[Tool], system_prompt: str,
                  permission_checker: PermissionChecker,
@@ -20,51 +24,134 @@ class Engine:
         self._system_prompt = system_prompt
         self._permissions = permission_checker
         self._messages: list[dict] = []
+        self._aborted = False
+        self._active_stream = None  # reference to current HTTP stream
+
+    def abort(self):
+        """Abort the current turn immediately.
+
+        Matches claude-code-main's AbortController.abort(): sets flag and
+        closes the active HTTP stream so the generator unblocks at once.
+        """
+        self._aborted = True
+        if self._active_stream is not None:
+            try:
+                self._active_stream.close()
+            except Exception:
+                pass
+
+    def cancel_turn(self):
+        """Roll back messages to the state before the current turn started."""
+        # Remove trailing messages until we get back to a clean state.
+        # A valid conversation alternates user/assistant. After cancel we may
+        # have a dangling user or assistant message — trim them.
+        while self._messages:
+            last = self._messages[-1]
+            # Keep the conversation if it ends with a complete assistant text reply
+            if last["role"] == "assistant":
+                break
+            # A user message at the end means we never got a reply — remove it
+            self._messages.pop()
+        # If the last assistant message contains tool_use blocks without
+        # corresponding tool_results, remove it too (incomplete turn)
+        if self._messages and self._messages[-1]["role"] == "assistant":
+            content = self._messages[-1].get("content", [])
+            has_tool_use = any(
+                getattr(b, "type", None) == "tool_use"
+                or (isinstance(b, dict) and b.get("type") == "tool_use")
+                for b in (content if isinstance(content, list) else [])
+            )
+            if has_tool_use:
+                self._messages.pop()
+                # Also remove the user tool_results that preceded it, if any
+                if self._messages and self._messages[-1]["role"] == "user":
+                    last_content = self._messages[-1].get("content", "")
+                    if isinstance(last_content, list) and all(
+                        isinstance(c, dict) and c.get("type") == "tool_result"
+                        for c in last_content
+                    ):
+                        self._messages.pop()
 
     def submit(self, user_input: str) -> Iterator[tuple]:
         """Send user message; yield events until the conversation turn completes.
 
         Yields:
           ("text", str)                         — streamed text chunk
+          ("tool_call", name, input)            — before each tool executes
           ("tool_result", name, input, result)  — after each tool executes
+
+        Raises:
+          AbortedError — if abort() was called (by Esc listener or Ctrl+C)
         """
+        self._aborted = False
         self._messages.append({"role": "user", "content": user_input})
 
-        while True:
-            tool_uses = []
+        try:
+            while True:
+                if self._aborted:
+                    raise AbortedError()
 
-            with self._client.messages.stream(
-                model=self._model,
-                max_tokens=self._max_tokens,
-                system=self._system_prompt,
-                tools=[t.to_api_schema() for t in self._tools.values()],
-                messages=self._messages,
-            ) as stream:
-                for text in stream.text_stream:
-                    yield ("text", text)
+                tool_uses = []
 
-                final = stream.get_final_message()
-                for block in final.content:
-                    if block.type == "tool_use":
-                        tool_uses.append(block)
+                try:
+                    with self._client.messages.stream(
+                        model=self._model,
+                        max_tokens=self._max_tokens,
+                        system=self._system_prompt,
+                        tools=[t.to_api_schema() for t in self._tools.values()],
+                        messages=self._messages,
+                    ) as stream:
+                        self._active_stream = stream
+                        got_text = False
+                        for text in stream.text_stream:
+                            if self._aborted:
+                                raise AbortedError()
+                            got_text = True
+                            yield ("text", text)
 
-            self._messages.append({"role": "assistant", "content": final.content})
+                        if self._aborted:
+                            raise AbortedError()
 
-            if not tool_uses:
-                break
+                        # text_stream ended but response may still be
+                        # generating tool_use input — signal the UI to
+                        # show a spinner during this gap.
+                        if got_text:
+                            yield ("waiting",)
 
-            tool_results = []
-            for tool_use in tool_uses:
-                result = self._execute_tool(tool_use)
-                yield ("tool_result", tool_use.name, tool_use.input, result)
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_use.id,
-                    "content": result.content,
-                    "is_error": result.is_error,
-                })
+                        final = stream.get_final_message()
+                        for block in final.content:
+                            if block.type == "tool_use":
+                                tool_uses.append(block)
+                except Exception:
+                    if self._aborted:
+                        raise AbortedError()
+                    raise
+                finally:
+                    self._active_stream = None
 
-            self._messages.append({"role": "user", "content": tool_results})
+                self._messages.append({"role": "assistant", "content": final.content})
+
+                if not tool_uses:
+                    break
+
+                tool_results = []
+                for tool_use in tool_uses:
+                    if self._aborted:
+                        raise AbortedError()
+                    yield ("tool_call", tool_use.name, tool_use.input)
+                    result = self._execute_tool(tool_use)
+                    yield ("tool_result", tool_use.name, tool_use.input, result)
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tool_use.id,
+                        "content": result.content,
+                        "is_error": result.is_error,
+                    })
+
+                self._messages.append({"role": "user", "content": tool_results})
+        except AbortedError:
+            self.cancel_turn()
+            raise
 
     def _execute_tool(self, tool_use) -> ToolResult:
         tool = self._tools.get(tool_use.name)
