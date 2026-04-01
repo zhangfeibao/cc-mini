@@ -106,6 +106,12 @@ class StoredCompanion:
 
 
 @dataclass(frozen=True)
+class StoredCompanionWithSeed(StoredCompanion):
+    """Stored companion that also remembers the seed used to generate bones."""
+    seed: str = ''
+
+
+@dataclass(frozen=True)
 class Companion:
     """Full companion = bones + soul + metadata."""
     # Bones

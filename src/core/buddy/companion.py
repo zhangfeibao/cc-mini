@@ -166,14 +166,14 @@ def companion_user_id() -> str:
 # Get companion (merge stored soul + regenerated bones)
 # ---------------------------------------------------------------------------
 
-def get_companion() -> Companion | None:
-    """Get the full companion if one has been hatched, or None."""
-    from .storage import load_stored_companion
-
-    stored = load_stored_companion()
-    if stored is None:
-        return None
-    bones = roll(companion_user_id()).bones
+def _companion_from_stored(
+    stored_name: str,
+    stored_personality: str,
+    stored_hatched_at: int,
+    seed: str,
+) -> Companion:
+    """Build a full Companion by regenerating bones from seed."""
+    bones = roll_with_seed(seed).bones
     return Companion(
         rarity=bones.rarity,
         species=bones.species,
@@ -181,7 +181,36 @@ def get_companion() -> Companion | None:
         hat=bones.hat,
         shiny=bones.shiny,
         stats=bones.stats,
-        name=stored.name,
-        personality=stored.personality,
-        hatched_at=stored.hatched_at,
+        name=stored_name,
+        personality=stored_personality,
+        hatched_at=stored_hatched_at,
     )
+
+
+def get_companion() -> Companion | None:
+    """Get the full active companion if one has been hatched, or None."""
+    from .storage import load_stored_companion, load_active_seed
+
+    stored = load_stored_companion()
+    if stored is None:
+        return None
+    seed = load_active_seed()
+    if not seed:
+        # Fallback for legacy data
+        seed = companion_user_id() + SALT
+    return _companion_from_stored(
+        stored.name, stored.personality, stored.hatched_at, seed,
+    )
+
+
+def get_all_companions() -> list[Companion]:
+    """Get all hatched companions (bones regenerated from each seed)."""
+    from .storage import load_all_stored_companions
+
+    result = []
+    for sc in load_all_stored_companions():
+        seed = sc.seed or (companion_user_id() + SALT)
+        result.append(_companion_from_stored(
+            sc.name, sc.personality, sc.hatched_at, seed,
+        ))
+    return result

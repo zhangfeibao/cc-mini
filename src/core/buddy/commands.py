@@ -4,23 +4,30 @@ Subcommands:
   /buddy          — hatch (first time) or show companion card
   /buddy pet      — pet your companion (heart animation)
   /buddy stats    — show detailed stats
+  /buddy new      — hatch a new random companion
+  /buddy list     — view all companions (仓库)
+  /buddy select N  — switch active companion to #N
   /buddy mute     — mute companion reactions
   /buddy unmute   — unmute companion reactions
 """
 from __future__ import annotations
 
 import time
+import uuid
 
 from rich.console import Console
 from rich.live import Live
 from rich.text import Text
 from ..llm import LLMClient
 
-from .companion import companion_user_id, get_companion, roll
-from .render import render_companion_card, render_hatch_animation, render_compact_status
+from .companion import companion_user_id, get_companion, get_all_companions, roll, roll_with_seed
+from .render import render_companion_card, render_hatch_animation, render_compact_status, render_companion_list
 from .storage import (
+    load_active_index,
     load_companion_muted,
+    save_active_index,
     save_companion_muted,
+    save_new_companion,
     save_stored_companion,
 )
 from .types import CompanionBones, CompanionSoul
@@ -89,6 +96,31 @@ def _hatch(client: LLMClient, console: Console, model: str) -> None:
         )
 
     save_stored_companion(soul)
+    render_hatch_animation(bones, soul, console)
+
+    companion = get_companion()
+    if companion:
+        render_companion_card(companion, console)
+
+
+def _hatch_new(client: LLMClient, console: Console, model: str) -> None:
+    """Hatch an additional random companion with a unique seed."""
+    seed = f'buddy-new-{uuid.uuid4()}'
+    r = roll_with_seed(seed)
+    bones = r.bones
+
+    console.print(f'\n[dim]Hatching a new companion...[/dim]')
+
+    try:
+        soul = _generate_soul(bones, client, model)
+    except Exception as e:
+        console.print(f'[red]Failed to generate companion soul: {e}[/red]')
+        soul = CompanionSoul(
+            name='Buddy',
+            personality=f'A quiet {bones.species} who prefers actions over words.',
+        )
+
+    save_new_companion(soul, seed)
     render_hatch_animation(bones, soul, console)
 
     companion = get_companion()
@@ -182,7 +214,32 @@ def handle_buddy_command(
         save_companion_muted(False)
         console.print('[dim]Companion reactions unmuted.[/dim]')
 
+    elif subcmd == 'new':
+        _hatch_new(client, console, model)
+
+    elif subcmd == 'list':
+        companions = get_all_companions()
+        active = load_active_index()
+        render_companion_list(companions, active, console)
+
+    elif subcmd.startswith('select'):
+        # Parse: /buddy select N (1-based)
+        parts = subcmd.split()
+        if len(parts) != 2 or not parts[1].isdigit():
+            console.print('[dim]Usage: /buddy select <number> (e.g. /buddy select 2)[/dim]')
+        else:
+            n = int(parts[1])
+            companions = get_all_companions()
+            if n < 1 or n > len(companions):
+                console.print(f'[dim]Invalid number. You have {len(companions)} companion(s). Use 1-{len(companions)}.[/dim]')
+            else:
+                idx = n - 1
+                save_active_index(idx)
+                comp = companions[idx]
+                console.print(f'[bold]Switched to #{n}: {comp.name} the {comp.species}[/bold]')
+                render_companion_card(comp, console)
+
     else:
         console.print(
-            '[dim]Usage: /buddy [pet|stats|mute|unmute][/dim]'
+            '[dim]Usage: /buddy [pet|stats|new|list|select N|mute|unmute][/dim]'
         )
