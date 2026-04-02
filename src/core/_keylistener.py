@@ -13,10 +13,15 @@ from __future__ import annotations
 import os
 import sys
 import select
-import termios
-import tty
 import threading
 from typing import Callable
+
+try:
+    import termios
+    import tty
+    _HAS_TERMIOS = True
+except ImportError:
+    _HAS_TERMIOS = False
 
 
 class EscListener:
@@ -150,3 +155,77 @@ class EscListener:
             # Non-ESC byte: ignore (already consumed).
             # This is fine because the listener is only active when
             # no interactive input is expected.
+
+
+# ---------------------------------------------------------------------------
+# Windows fallback: termios/tty are Unix-only; use msvcrt instead.
+# ---------------------------------------------------------------------------
+if not _HAS_TERMIOS:
+    import msvcrt
+
+    class EscListener:  # type: ignore[no-redef]
+        """Windows version of EscListener using msvcrt (no terminal raw mode needed)."""
+
+        def __init__(self, on_cancel: Callable[[], None] | None = None):
+            self.pressed = False
+            self._on_cancel = on_cancel
+            self._stop = threading.Event()
+            self._paused = threading.Event()   # set = paused, clear = running
+            self._thread: threading.Thread | None = None
+
+        # -- context manager --------------------------------------------------
+
+        def __enter__(self):
+            self.pressed = False
+            self._stop.clear()
+            self._paused.clear()
+            self._thread = threading.Thread(target=self._listen, daemon=True)
+            self._thread.start()
+            return self
+
+        def __exit__(self, *_exc):
+            self._stop.set()
+            if self._thread is not None:
+                self._thread.join(timeout=0.5)
+
+        # -- pause/resume for interactive input --------------------------------
+
+        def pause(self):
+            """Pause the listener so stdin can be read by permission prompts."""
+            self._paused.set()
+
+        def resume(self):
+            """Resume listening after interactive input is done."""
+            self._paused.clear()
+
+        # -- non-blocking ESC check for main thread ----------------------------
+
+        def check_esc_nonblocking(self) -> bool:
+            if self.pressed:
+                return True
+            while msvcrt.kbhit():
+                if msvcrt.getch() == b'\x1b':
+                    self.pressed = True
+                    if self._on_cancel:
+                        self._on_cancel()
+                    return True
+            return False
+
+        # -- internal ---------------------------------------------------------
+
+        def _listen(self):
+            while not self._stop.is_set():
+                # If paused, just sleep and check again
+                if self._paused.is_set():
+                    self._stop.wait(0.05)
+                    continue
+                if not msvcrt.kbhit():
+                    self._stop.wait(0.05)
+                    continue
+                if self._paused.is_set():
+                    continue
+                if msvcrt.getch() == b'\x1b':
+                    self.pressed = True
+                    if self._on_cancel:
+                        self._on_cancel()
+                    return
