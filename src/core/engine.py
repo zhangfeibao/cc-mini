@@ -163,6 +163,23 @@ class Engine:
             provider=self._provider,
         )
 
+    def get_provider(self) -> str:
+        return self._provider
+
+    def set_provider(
+        self,
+        provider: str,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
+    ) -> None:
+        from .llm import LLMClient, validate_provider
+        provider = validate_provider(provider)
+        self._client = LLMClient(provider=provider, api_key=api_key, base_url=base_url)
+        self._provider = provider
+        self._model = resolve_model(model, provider=provider)
+        self._max_tokens = default_max_tokens_for_model(self._model, provider=provider)
+
     def _persist(self, message: dict) -> None:
         """Append message to session store if available."""
         if self._session_store is not None:

@@ -422,6 +422,64 @@ def _cmd_model(ctx: CommandContext, args: str) -> None:
     )
 
 
+def _cmd_provider(ctx: CommandContext, args: str) -> None:
+    """Show or switch the LLM provider."""
+    from dataclasses import replace
+    from .config import resolve_model, default_max_tokens_for_model
+    from .llm import validate_provider
+
+    current = ctx.engine.get_provider()
+
+    if not args:
+        ctx.console.print(
+            f"[dim]当前 provider: [bold]{current}[/bold][/dim]\n"
+            f"[dim]可用: anthropic, openai[/dim]\n"
+            f"[dim]用法: /provider <name>  (例: /provider openai)[/dim]"
+        )
+        return
+
+    target = args.strip().lower()
+    try:
+        target = validate_provider(target)
+    except ValueError:
+        ctx.console.print(f"[red]不支持的 provider: {args.strip()}[/red]\n"
+                          f"[dim]可用: anthropic, openai[/dim]")
+        return
+
+    if target == current:
+        ctx.console.print(f"[dim]已经在使用 {current} provider[/dim]")
+        return
+
+    # 从环境变量读取目标 provider 的凭据
+    if target == "openai":
+        api_key = os.environ.get("OPENAI_API_KEY")
+        base_url = os.environ.get("OPENAI_BASE_URL")
+    else:
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        base_url = os.environ.get("ANTHROPIC_BASE_URL")
+
+    try:
+        ctx.engine.set_provider(provider=target, api_key=api_key, base_url=base_url)
+    except ValueError as exc:
+        ctx.console.print(f"[red]切换失败: {exc}[/red]")
+        return
+
+    model = ctx.engine.get_model()
+    max_tokens = default_max_tokens_for_model(model, provider=target)
+    ctx.app_config = replace(
+        ctx.app_config,
+        provider=target,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        max_tokens=max_tokens,
+    )
+    ctx.console.print(
+        f"[green]✓[/green] 已切换到 [bold]{target}[/bold] provider  "
+        f"(model={model}, max_tokens={max_tokens})"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Command registry
 # ---------------------------------------------------------------------------
@@ -462,8 +520,9 @@ _COMMAND_TABLE: list[tuple[str, str, object]] = [
     ("dream",    "Consolidate daily logs into topic files",          _cmd_dream),
     ("skills",   "List all available skills",                       _cmd_skills),
     ("cost",    "Show token usage and cost summary",               _cmd_cost),
-    ("model",   "Show or switch model [model-name]",               _cmd_model),
-    ("plan",    "Enter plan mode or show current plan",             _cmd_plan),
+    ("model",    "Show or switch model [model-name]",               _cmd_model),
+    ("provider", "Show or switch provider [anthropic|openai]",      _cmd_provider),
+    ("plan",     "Enter plan mode or show current plan",            _cmd_plan),
 ]
 
 _HANDLERS: dict[str, object] = {name: handler for name, _, handler in _COMMAND_TABLE}
