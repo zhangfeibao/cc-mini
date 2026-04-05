@@ -674,12 +674,20 @@ def main() -> None:
                         help="Minimum new sessions before auto-dream triggers (default: 5)")
     parser.add_argument("--coordinator", action="store_true",
                         help="Enable coordinator mode with background workers")
+    parser.add_argument("--stdio", action="store_true",
+                        help="Run in stdio JSON protocol mode for IDE/GUI integration")
     args = parser.parse_args()
 
     try:
         app_config = load_app_config(args)
     except ValueError as exc:
         parser.error(str(exc))
+
+    # Stdio JSON protocol mode — early exit before REPL setup
+    if args.stdio:
+        from .stdio_server import run_stdio
+        run_stdio(app_config)
+        return
 
     # Sandbox initialization
     sandbox_config = load_sandbox_config(app_config.config_paths)
