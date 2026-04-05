@@ -350,7 +350,7 @@ def _handle_slash_command(
     name: str, args: str, request_id: str | None, emit: Any, cmd_ctx: Any,
 ) -> None:
     """Execute a slash command and emit the result."""
-    from .commands import handle_command
+    from .commands import _HANDLERS
     from rich.console import Console as RichConsole
 
     # Block unsupported commands
@@ -368,7 +368,23 @@ def _handle_slash_command(
         _handle_model_info(cmd_ctx, request_id, emit)
         return
 
-    # Capture Rich Console output to a StringIO buffer
+    # --- Skill invocation: feed prompt through normal engine.submit() flow ---
+    if name not in _HANDLERS:
+        from .skills import get_skill
+        skill = get_skill(name)
+        if skill is not None:
+            _handle_skill(skill, args, request_id, emit, cmd_ctx)
+            return
+        # Unknown command
+        emit(request_id, "command_result", {
+            "command": name,
+            "output": f"未知命令: /{name}  (试试 /help 或 /skills)",
+            "state_changed": False,
+        })
+        emit(request_id, "done", {})
+        return
+
+    # --- Built-in command: capture Rich Console output ---
     buf = StringIO()
     saved_console = cmd_ctx.console
     cmd_ctx.console = RichConsole(
@@ -376,7 +392,8 @@ def _handle_slash_command(
     )
 
     try:
-        handled = handle_command(name, args, cmd_ctx)
+        from .commands import handle_command
+        handle_command(name, args, cmd_ctx)
     except Exception as exc:
         emit(request_id, "error", {"message": f"命令执行出错: {exc}"})
         emit(request_id, "done", {})
@@ -385,8 +402,6 @@ def _handle_slash_command(
         cmd_ctx.console = saved_console
 
     output = buf.getvalue().strip()
-    if not handled:
-        output = f"未知命令: /{name}  (试试 /help)"
 
     emit(request_id, "command_result", {
         "command": name,
@@ -395,10 +410,44 @@ def _handle_slash_command(
     })
 
     # /clear: tell client to reset its UI state
-    if name == "clear" and handled:
+    if name == "clear":
         emit(request_id, "clear", {})
 
     emit(request_id, "done", {})
+
+
+def _handle_skill(skill: Any, args: str, request_id: str | None, emit: Any,
+                  cmd_ctx: Any) -> None:
+    """Execute a skill by feeding its prompt through the normal engine event flow.
+
+    Unlike built-in commands (whose output is captured from Rich Console),
+    skills need to go through ``engine.submit()`` so the client receives the
+    full stream of text / tool_call / tool_result events.
+    """
+    prompt = skill.get_prompt(args)
+    if not prompt:
+        emit(request_id, "command_result", {
+            "command": skill.name,
+            "output": f"Skill /{skill.name} produced no prompt.",
+            "state_changed": False,
+        })
+        emit(request_id, "done", {})
+        return
+
+    engine = cmd_ctx.engine
+
+    if skill.context == "fork":
+        # Forked: isolated turn, restore messages afterwards
+        saved = list(engine.get_messages())
+        engine.set_messages([])
+        try:
+            # cmd_ctx=None prevents re-parsing skill prompt as a slash command
+            _handle_submit(engine, prompt, request_id, emit, cmd_ctx=None)
+        finally:
+            engine.set_messages(saved)
+    else:
+        # Inline: inject prompt into ongoing conversation
+        _handle_submit(engine, prompt, request_id, emit, cmd_ctx=None)
 
 
 def _handle_model_info(cmd_ctx: Any, request_id: str | None, emit: Any) -> None:
