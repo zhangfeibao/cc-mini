@@ -108,6 +108,14 @@
                                     </StackPanel>
                                 </Border>
 
+                                <!-- 系统/命令结果消息 -->
+                                <Border Style="{StaticResource SystemBubble}"
+                                        Visibility="{Binding Role, Converter={StaticResource EnumVis}, ConverterParameter=System}">
+                                    <TextBlock Text="{Binding Text}" TextWrapping="Wrap"
+                                               FontFamily="Cascadia Code, Consolas" FontSize="13"
+                                               Foreground="{StaticResource SubtextBrush}"/>
+                                </Border>
+
                                 <!-- 助手消息 -->
                                 <Border Style="{StaticResource AssistantBubble}"
                                         Visibility="{Binding Role, Converter={StaticResource EnumVis}, ConverterParameter=Assistant}">

@@ -137,6 +137,16 @@
         <Setter Property="HorizontalAlignment" Value="Left"/>
     </Style>
 
+    <!-- ── 系统/命令结果消息 ── -->
+    <Style x:Key="SystemBubble" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource MantleBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Surface1Brush}"/>
+        <Setter Property="BorderThickness" Value="0,0,0,1"/>
+        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="Padding" Value="14,8"/>
+        <Setter Property="Margin" Value="12,4"/>
+    </Style>
+
     <!-- ── 工具调用区域（右侧面板卡片） ── -->
     <Style x:Key="ToolCallBorder" TargetType="Border">
         <Setter Property="Background" Value="{StaticResource MantleBrush}"/>

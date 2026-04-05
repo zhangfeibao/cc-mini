@@ -260,6 +260,30 @@ public partial class MainViewModel : ObservableObject
                         CostText = $"↑{input} ↓{output}";
                         break;
 
+                    case "command_result":
+                        var cmdOutput = ev.GetString("output");
+                        if (!string.IsNullOrEmpty(cmdOutput))
+                        {
+                            assistantMsg.Text = cmdOutput;
+                            assistantMsg.Role = MessageRole.System;
+                            assistantMsg.Status = MessageStatus.Complete;
+                        }
+                        break;
+
+                    case "clear":
+                        // 保留当前的系统消息（command_result），清空其他所有状态
+                        var keep = new List<ChatMessage>();
+                        foreach (var m in Messages)
+                            if (m == assistantMsg) keep.Add(m);
+                        Messages.Clear();
+                        foreach (var m in keep) Messages.Add(m);
+                        AllToolCalls.Clear();
+                        HasAnyToolCalls = false;
+                        _toolCallCounter = 0;
+                        _taskCounter = 0;
+                        CostText = "";
+                        break;
+
                     case "error":
                         var errorMsg = ev.GetString("message");
                         if (!string.IsNullOrEmpty(errorMsg))
