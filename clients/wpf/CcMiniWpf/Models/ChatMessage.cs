@@ -18,6 +18,9 @@ public partial class ChatMessage : ObservableObject
     [ObservableProperty] private MessageStatus _status = MessageStatus.Pending;
     [ObservableProperty] private DateTime _timestamp = DateTime.Now;
 
+    /// <summary>用户任务序号（#1, #2...），User 和对应 Assistant 消息共享。</summary>
+    [ObservableProperty] private int _taskIndex;
+
     public ObservableCollection<ToolCallInfo> ToolCalls { get; } = [];
 
     /// <summary>流式追加文本片段。</summary>
@@ -39,6 +42,18 @@ public partial class ToolCallInfo : ObservableObject
     [ObservableProperty] private bool _isError;
     [ObservableProperty] private bool _isExpanded;
     [ObservableProperty] private ToolCallStatus _status = ToolCallStatus.Pending;
+
+    /// <summary>全局工具调用编号（从1递增），左侧显示为 📎1、📎2。</summary>
+    [ObservableProperty] private int _globalIndex;
+
+    /// <summary>所属用户任务序号，右侧卡片显示 #1、#2。</summary>
+    [ObservableProperty] private int _taskIndex;
+
+    /// <summary>点击定位时的短暂高亮效果。</summary>
+    [ObservableProperty] private bool _isHighlighted;
+
+    /// <summary>所属的 ChatMessage 引用，用于点击定位。</summary>
+    public ChatMessage? OwnerMessage { get; set; }
 
     public static string SummarizeInput(JsonElement? input)
     {

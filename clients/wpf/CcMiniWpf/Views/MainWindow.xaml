@@ -81,91 +81,182 @@
             </Grid>
         </Border>
 
-        <!-- ═══ 聊天消息列表 ═══ -->
-        <ScrollViewer Grid.Row="1" x:Name="ChatScroller"
-                      VerticalScrollBarVisibility="Auto" Padding="0,8">
-            <ItemsControl ItemsSource="{Binding Messages}" Margin="0,0,0,8">
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate DataType="{x:Type models:ChatMessage}">
-                        <Grid Margin="0,2">
-                            <!-- 用户消息 -->
-                            <Border Style="{StaticResource UserBubble}"
-                                    Visibility="{Binding Role, Converter={StaticResource EnumVis}, ConverterParameter=User}">
-                                <TextBlock Text="{Binding Text}" TextWrapping="Wrap"
-                                           Foreground="{StaticResource TextBrush}"/>
-                            </Border>
+        <!-- ═══ 聊天区域（左右分栏） ═══ -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
 
-                            <!-- 助手消息 -->
-                            <Border Style="{StaticResource AssistantBubble}"
-                                    Visibility="{Binding Role, Converter={StaticResource EnumVis}, ConverterParameter=Assistant}">
-                                <StackPanel>
-                                    <!-- 文本内容 -->
-                                    <TextBlock Text="{Binding Text}" TextWrapping="Wrap"
-                                               Foreground="{StaticResource TextBrush}"/>
+            <!-- ── 左侧：对话文本流 ── -->
+            <ScrollViewer Grid.Column="0" x:Name="ChatScroller"
+                          VerticalScrollBarVisibility="Auto" Padding="0,8"
+                          ScrollChanged="ChatScroller_ScrollChanged">
+                <ItemsControl x:Name="ChatItemsControl" ItemsSource="{Binding Messages}" Margin="0,0,0,8">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type models:ChatMessage}">
+                            <Grid Margin="0,2">
+                                <!-- 用户消息 -->
+                                <Border Style="{StaticResource UserBubble}"
+                                        Visibility="{Binding Role, Converter={StaticResource EnumVis}, ConverterParameter=User}">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding TaskIndex, StringFormat='#{0}'}"
+                                                   Foreground="{StaticResource OverlayBrush}"
+                                                   FontSize="11" Margin="0,0,0,2"/>
+                                        <TextBlock Text="{Binding Text}" TextWrapping="Wrap"
+                                                   Foreground="{StaticResource TextBrush}"/>
+                                    </StackPanel>
+                                </Border>
 
-                                    <!-- 工具调用列表 -->
-                                    <ItemsControl ItemsSource="{Binding ToolCalls}" Margin="0,4,0,0">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate DataType="{x:Type models:ToolCallInfo}">
-                                                <Border Style="{StaticResource ToolCallBorder}">
-                                                    <StackPanel>
-                                                        <!-- 工具头部 -->
+                                <!-- 助手消息 -->
+                                <Border Style="{StaticResource AssistantBubble}"
+                                        Visibility="{Binding Role, Converter={StaticResource EnumVis}, ConverterParameter=Assistant}">
+                                    <StackPanel>
+                                        <!-- 文本内容 -->
+                                        <TextBlock Text="{Binding Text}" TextWrapping="Wrap"
+                                                   Foreground="{StaticResource TextBrush}"/>
+
+                                        <!-- 工具锚点引用标记（紧凑横排） -->
+                                        <ItemsControl ItemsSource="{Binding ToolCalls}" Margin="0,4,0,0">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <WrapPanel Orientation="Horizontal"/>
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate DataType="{x:Type models:ToolCallInfo}">
+                                                    <Border Style="{StaticResource ToolAnchorBorder}"
+                                                            MouseLeftButtonDown="ToolAnchor_Click">
                                                         <StackPanel Orientation="Horizontal">
-                                                            <TextBlock FontWeight="SemiBold"
-                                                                       Foreground="{StaticResource BlueBrush}">
-                                                                <Run Text="⚙ "/><Run Text="{Binding Name, Mode=OneWay}"/>
+                                                            <TextBlock FontSize="11" Foreground="{StaticResource BlueBrush}" FontWeight="SemiBold">
+                                                                <Run Text="&#x1F4CE;"/><Run Text="{Binding GlobalIndex, Mode=OneWay}"/>
                                                             </TextBlock>
-                                                            <TextBlock Text="{Binding Activity}" Margin="8,0,0,0"
-                                                                       Foreground="{StaticResource SubtextBrush}" FontSize="12"/>
+                                                            <TextBlock Text="{Binding Name}" FontSize="11" Margin="4,0,0,0"
+                                                                       Foreground="{StaticResource SubtextBrush}"/>
                                                             <!-- 状态指示 -->
-                                                            <TextBlock Text=" ●" FontSize="10" Margin="6,0,0,0"
+                                                            <TextBlock Text=" &#x25CF;" FontSize="8" Margin="4,0,0,0"
                                                                        Foreground="{StaticResource YellowBrush}"
                                                                        Visibility="{Binding Status, Converter={StaticResource EnumVis}, ConverterParameter=Executing}"/>
-                                                            <TextBlock Text=" ✓" FontSize="12" Margin="4,0,0,0"
+                                                            <TextBlock Text=" &#x2713;" FontSize="10" Margin="2,0,0,0"
                                                                        Foreground="{StaticResource GreenBrush}"
                                                                        Visibility="{Binding Status, Converter={StaticResource EnumVis}, ConverterParameter=Complete}"/>
                                                         </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
 
-                                                        <!-- 输入摘要 -->
-                                                        <TextBlock Text="{Binding InputSummary}" TextWrapping="Wrap"
-                                                                   Foreground="{StaticResource OverlayBrush}"
-                                                                   FontSize="12" Margin="0,4,0,0"
-                                                                   MaxHeight="60" TextTrimming="CharacterEllipsis"/>
+                                        <!-- 流式指示 -->
+                                        <TextBlock Text="&#x258C;" Foreground="{StaticResource BlueBrush}" FontSize="16"
+                                                   Visibility="{Binding Status, Converter={StaticResource EnumVis}, ConverterParameter=Streaming}"/>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
 
-                                                        <!-- 结果（可折叠） -->
-                                                        <Expander IsExpanded="{Binding IsExpanded}"
-                                                                  Margin="0,4,0,0"
-                                                                  Visibility="{Binding Status, Converter={StaticResource EnumVis}, ConverterParameter=Complete}">
-                                                            <Expander.Header>
-                                                                <TextBlock Text="查看结果" FontSize="12"
-                                                                           Foreground="{StaticResource SubtextBrush}"/>
-                                                            </Expander.Header>
-                                                            <TextBlock Text="{Binding ResultContent}" TextWrapping="Wrap"
-                                                                       Foreground="{StaticResource SubtextBrush}"
-                                                                       FontSize="12" FontFamily="Cascadia Code, Consolas"
-                                                                       MaxHeight="200"/>
-                                                        </Expander>
+            <!-- ── 右侧：工具卡片面板 ── -->
+            <Border Grid.Column="1" Width="320"
+                    Background="{StaticResource MantleBrush}"
+                    BorderBrush="{StaticResource Surface1Brush}"
+                    BorderThickness="1,0,0,0"
+                    Visibility="{Binding HasAnyToolCalls, Converter={StaticResource BoolVis}}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
 
-                                                        <!-- 错误标记 -->
-                                                        <TextBlock Text="✗ 执行出错" Foreground="{StaticResource RedBrush}"
-                                                                   FontSize="12" Margin="0,2,0,0"
-                                                                   Visibility="{Binding IsError, Converter={StaticResource BoolVis}}"/>
-                                                    </StackPanel>
+                    <!-- 面板标题 -->
+                    <Border Grid.Row="0" Style="{StaticResource ToolPanelHeader}">
+                        <TextBlock Text="&#x2699; &#x5DE5;&#x5177;&#x8C03;&#x7528;" FontWeight="SemiBold" FontSize="13"
+                                   Foreground="{StaticResource SubtextBrush}"/>
+                    </Border>
+
+                    <!-- 工具卡片列表 -->
+                    <ScrollViewer Grid.Row="1" x:Name="ToolScroller"
+                                  VerticalScrollBarVisibility="Auto" Padding="8,4"
+                                  ScrollChanged="ToolScroller_ScrollChanged">
+                        <ItemsControl x:Name="ToolItemsControl" ItemsSource="{Binding AllToolCalls}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type models:ToolCallInfo}">
+                                    <Border x:Name="CardBorder" Style="{StaticResource ToolCallBorder}"
+                                            Cursor="Hand"
+                                            MouseLeftButtonDown="ToolCard_Click">
+                                        <StackPanel>
+                                            <!-- 任务标识 + 工具名 + 编号 -->
+                                            <StackPanel Orientation="Horizontal">
+                                                <Border Background="{StaticResource Surface1Brush}"
+                                                        CornerRadius="3" Padding="4,1" Margin="0,0,6,0">
+                                                    <TextBlock Text="{Binding TaskIndex, StringFormat='#{0}'}"
+                                                               FontSize="10"
+                                                               Foreground="{StaticResource PeachBrush}"/>
                                                 </Border>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
+                                                <TextBlock FontWeight="SemiBold"
+                                                           Foreground="{StaticResource BlueBrush}">
+                                                    <Run Text="&#x2699; "/><Run Text="{Binding Name, Mode=OneWay}"/>
+                                                </TextBlock>
+                                                <TextBlock Text="{Binding GlobalIndex, StringFormat=' &#x1F4CE;{0}'}"
+                                                           FontSize="11" Margin="4,0,0,0"
+                                                           Foreground="{StaticResource OverlayBrush}"/>
+                                            </StackPanel>
 
-                                    <!-- 流式指示 -->
-                                    <TextBlock Text="▌" Foreground="{StaticResource BlueBrush}" FontSize="16"
-                                               Visibility="{Binding Status, Converter={StaticResource EnumVis}, ConverterParameter=Streaming}"/>
-                                </StackPanel>
-                            </Border>
-                        </Grid>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-        </ScrollViewer>
+                                            <!-- Activity + 状态 -->
+                                            <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                                <TextBlock Text="{Binding Activity}"
+                                                           Foreground="{StaticResource SubtextBrush}"
+                                                           FontSize="12"/>
+                                                <TextBlock Text=" &#x25CF;" FontSize="10" Margin="6,0,0,0"
+                                                           Foreground="{StaticResource YellowBrush}"
+                                                           Visibility="{Binding Status, Converter={StaticResource EnumVis}, ConverterParameter=Executing}"/>
+                                                <TextBlock Text=" &#x2713;" FontSize="12" Margin="4,0,0,0"
+                                                           Foreground="{StaticResource GreenBrush}"
+                                                           Visibility="{Binding Status, Converter={StaticResource EnumVis}, ConverterParameter=Complete}"/>
+                                            </StackPanel>
+
+                                            <!-- 输入摘要 -->
+                                            <TextBlock Text="{Binding InputSummary}" TextWrapping="Wrap"
+                                                       Foreground="{StaticResource OverlayBrush}"
+                                                       FontSize="12" Margin="0,4,0,0"
+                                                       MaxHeight="60" TextTrimming="CharacterEllipsis"/>
+
+                                            <!-- 结果（可折叠） -->
+                                            <Expander IsExpanded="{Binding IsExpanded}"
+                                                      Margin="0,4,0,0"
+                                                      Visibility="{Binding Status, Converter={StaticResource EnumVis}, ConverterParameter=Complete}">
+                                                <Expander.Header>
+                                                    <TextBlock Text="&#x67E5;&#x770B;&#x7ED3;&#x679C;" FontSize="12"
+                                                               Foreground="{StaticResource SubtextBrush}"/>
+                                                </Expander.Header>
+                                                <TextBlock Text="{Binding ResultContent}" TextWrapping="Wrap"
+                                                           Foreground="{StaticResource SubtextBrush}"
+                                                           FontSize="12" FontFamily="Cascadia Code, Consolas"
+                                                           MaxHeight="200"/>
+                                            </Expander>
+
+                                            <!-- 错误标记 -->
+                                            <TextBlock Text="&#x2717; &#x6267;&#x884C;&#x51FA;&#x9519;" Foreground="{StaticResource RedBrush}"
+                                                       FontSize="12" Margin="0,2,0,0"
+                                                       Visibility="{Binding IsError, Converter={StaticResource BoolVis}}"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <DataTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
+                                            <Setter TargetName="CardBorder" Property="BorderBrush"
+                                                    Value="{StaticResource PeachBrush}"/>
+                                            <Setter TargetName="CardBorder" Property="BorderThickness"
+                                                    Value="2,1,1,1"/>
+                                        </DataTrigger>
+                                    </DataTemplate.Triggers>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
 
         <!-- ═══ 底部输入区 ═══ -->
         <Border Grid.Row="2" Background="{StaticResource MantleBrush}" Padding="12,10">

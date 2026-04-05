@@ -17,6 +17,12 @@ public partial class MainViewModel : ObservableObject
 
     public ObservableCollection<ChatMessage> Messages { get; } = [];
 
+    // ── 右侧工具面板 ──
+    public ObservableCollection<ToolCallInfo> AllToolCalls { get; } = [];
+    [ObservableProperty] private bool _hasAnyToolCalls;
+    private int _toolCallCounter;
+    private int _taskCounter;
+
     [ObservableProperty] private string _inputText = "";
     [ObservableProperty] private bool _isProcessing;
     [ObservableProperty] private string _currentProvider = "anthropic";
@@ -88,6 +94,10 @@ public partial class MainViewModel : ObservableObject
         {
             WorkingDirectory = dialog.FolderName;
             Messages.Clear();
+            AllToolCalls.Clear();
+            HasAnyToolCalls = false;
+            _toolCallCounter = 0;
+            _taskCounter = 0;
             CostText = "";
             await RestartClientAsync();
         }
@@ -191,11 +201,13 @@ public partial class MainViewModel : ObservableObject
 
         CloseCommandPopup();
 
-        Messages.Add(new ChatMessage { Role = MessageRole.User, Text = text, Status = MessageStatus.Complete });
+        var taskIndex = ++_taskCounter;
+
+        Messages.Add(new ChatMessage { Role = MessageRole.User, Text = text, Status = MessageStatus.Complete, TaskIndex = taskIndex });
         InputText = "";
         IsProcessing = true;
 
-        var assistantMsg = new ChatMessage { Role = MessageRole.Assistant, Status = MessageStatus.Streaming };
+        var assistantMsg = new ChatMessage { Role = MessageRole.Assistant, Status = MessageStatus.Streaming, TaskIndex = taskIndex };
         Messages.Add(assistantMsg);
 
         _submitCts = new CancellationTokenSource();
@@ -218,8 +230,13 @@ public partial class MainViewModel : ObservableObject
                             InputSummary = ToolCallInfo.SummarizeInput(ev.GetElement("input")),
                             Activity = ev.GetString("activity"),
                             Status = ToolCallStatus.Pending,
+                            GlobalIndex = ++_toolCallCounter,
+                            TaskIndex = taskIndex,
+                            OwnerMessage = assistantMsg,
                         };
                         assistantMsg.ToolCalls.Add(currentToolCall);
+                        AllToolCalls.Add(currentToolCall);
+                        HasAnyToolCalls = true;
                         break;
 
                     case "tool_executing":
