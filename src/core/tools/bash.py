@@ -91,6 +91,7 @@ class BashTool(Tool):
         try:
             result = subprocess.run(
                 actual_command, shell=True, capture_output=True,
+                stdin=subprocess.DEVNULL,
                 text=True, encoding="utf-8", errors="replace", timeout=timeout,
             )
             parts = []
