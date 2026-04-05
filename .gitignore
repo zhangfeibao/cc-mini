@@ -26,3 +26,6 @@ plan.md
 CLAUDE.md
 
 .cc-mini.toml
+/clients/wpf/CcMiniWpf/obj
+/clients/wpf/CcMiniWpf/bin
+/clients/wpf/CcMiniWpf/.vs
