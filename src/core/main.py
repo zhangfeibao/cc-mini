@@ -672,6 +672,8 @@ def main() -> None:
                         help="Hours between auto-dream runs (default: 24)")
     parser.add_argument("--dream-min-sessions", type=int,
                         help="Minimum new sessions before auto-dream triggers (default: 5)")
+    parser.add_argument("--profile",
+                        help="Use a named profile from TOML config (e.g. midea-gpt5)")
     parser.add_argument("--coordinator", action="store_true",
                         help="Enable coordinator mode with background workers")
     parser.add_argument("--stdio", action="store_true",
@@ -749,6 +751,7 @@ def main() -> None:
             provider=app_config.provider,
             api_key=app_config.api_key,
             base_url=app_config.base_url,
+            extra_headers=app_config.extra_headers,
             model=app_config.model,
             max_tokens=app_config.max_tokens,
             effort=app_config.effort,
@@ -795,6 +798,7 @@ def main() -> None:
         provider=app_config.provider,
         api_key=app_config.api_key,
         base_url=app_config.base_url,
+        extra_headers=app_config.extra_headers,
         model=app_config.model,
         max_tokens=app_config.max_tokens,
         effort=app_config.effort,

@@ -459,7 +459,10 @@ def _cmd_provider(ctx: CommandContext, args: str) -> None:
         base_url = os.environ.get("ANTHROPIC_BASE_URL")
 
     try:
-        ctx.engine.set_provider(provider=target, api_key=api_key, base_url=base_url)
+        ctx.engine.set_provider(
+            provider=target, api_key=api_key, base_url=base_url,
+            extra_headers=ctx.app_config.extra_headers,
+        )
     except ValueError as exc:
         ctx.console.print(f"[red]切换失败: {exc}[/red]")
         return
@@ -477,6 +480,106 @@ def _cmd_provider(ctx: CommandContext, args: str) -> None:
     ctx.console.print(
         f"[green]✓[/green] 已切换到 [bold]{target}[/bold] provider  "
         f"(model={model}, max_tokens={max_tokens})"
+    )
+
+
+def _cmd_profile(ctx: CommandContext, args: str) -> None:
+    """Show available profiles or switch to a named profile."""
+    from dataclasses import replace
+    from .config import (
+        resolve_model, default_max_tokens_for_model,
+    )
+    from .llm import validate_provider
+
+    profiles = ctx.app_config.available_profiles or {}
+    active = ctx.app_config.active_profile
+
+    if not args:
+        if not profiles:
+            ctx.console.print(
+                "[dim]未配置任何 profile。\n"
+                "在 TOML 配置文件中添加 [profiles.名称] 节来定义 profile。[/dim]"
+            )
+            return
+        table = Table(title="可用 Profiles", show_header=True, header_style="bold cyan")
+        table.add_column("名称", style="green")
+        table.add_column("Provider")
+        table.add_column("Model")
+        table.add_column("Base URL")
+        table.add_column("状态")
+        for name, pv in profiles.items():
+            status = "[bold green]● 当前[/bold green]" if name == active else ""
+            table.add_row(
+                name,
+                pv.get("provider", "-"),
+                pv.get("model", "-"),
+                pv.get("base_url", "-"),
+                status,
+            )
+        ctx.console.print(table)
+        ctx.console.print("[dim]用法: /profile <名称>  切换到指定 profile[/dim]")
+        return
+
+    target = args.strip()
+    if target not in profiles:
+        ctx.console.print(
+            f"[red]未找到 profile: {target}[/red]\n"
+            f"[dim]可用: {', '.join(profiles.keys())}[/dim]"
+        )
+        return
+
+    if target == active:
+        ctx.console.print(f"[dim]已经在使用 profile: {target}[/dim]")
+        return
+
+    pv = profiles[target]
+    provider = validate_provider(pv.get("provider", "openai"))
+    model = resolve_model(pv.get("model"), provider=provider)
+    max_tokens = default_max_tokens_for_model(model, provider=provider)
+    raw_max = pv.get("max_tokens")
+    if raw_max is not None:
+        max_tokens = int(raw_max)
+
+    extra_headers = pv.get("extra_headers")
+    if isinstance(extra_headers, dict):
+        extra_headers = dict(extra_headers)
+    else:
+        extra_headers = None
+
+    api_key = pv.get("api_key")
+    if not api_key and extra_headers and "Authorization" in extra_headers:
+        api_key = "unused"
+    base_url = pv.get("base_url")
+
+    try:
+        ctx.engine.set_provider(
+            provider=provider, api_key=api_key, base_url=base_url,
+            model=model, extra_headers=extra_headers,
+        )
+    except ValueError as exc:
+        ctx.console.print(f"[red]切换失败: {exc}[/red]")
+        return
+
+    raw_effort = pv.get("effort")
+    effort = None
+    if raw_effort and str(raw_effort).strip().lower() in ("low", "medium", "high"):
+        effort = str(raw_effort).strip().lower()
+        ctx.engine._effort = effort
+
+    ctx.app_config = replace(
+        ctx.app_config,
+        provider=provider,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        max_tokens=max_tokens,
+        effort=effort,
+        extra_headers=extra_headers,
+        active_profile=target,
+    )
+    ctx.console.print(
+        f"[green]✓[/green] 已切换到 profile [bold]{target}[/bold]  "
+        f"(provider={provider}, model={model}, max_tokens={max_tokens})"
     )
 
 
@@ -522,6 +625,7 @@ _COMMAND_TABLE: list[tuple[str, str, object]] = [
     ("cost",    "Show token usage and cost summary",               _cmd_cost),
     ("model",    "Show or switch model [model-name]",               _cmd_model),
     ("provider", "Show or switch provider [anthropic|openai]",      _cmd_provider),
+    ("profile",  "Show or switch named profile [profile-name]",     _cmd_profile),
     ("plan",     "Enter plan mode or show current plan",            _cmd_plan),
 ]
 

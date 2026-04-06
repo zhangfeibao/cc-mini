@@ -105,6 +105,7 @@ class Engine:
                  max_tokens: int | None = None,
                  api_key: str | None = None,
                  base_url: str | None = None,
+                 extra_headers: dict[str, str] | None = None,
                  effort: str | None = None,
                  session_store: SessionStore | None = None,
                  cost_tracker: CostTracker | None = None):
@@ -115,10 +116,12 @@ class Engine:
             provider=provider,
         )
         self._effort = effort
+        self._extra_headers = extra_headers
         self._client = LLMClient(
             provider=provider,
             api_key=api_key,
             base_url=base_url,
+            extra_headers=extra_headers,
         )
         self._tools = {t.name: t for t in tools}
         self._system_prompt = system_prompt
@@ -172,11 +175,16 @@ class Engine:
         api_key: str | None = None,
         base_url: str | None = None,
         model: str | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> None:
         from .llm import LLMClient, validate_provider
         provider = validate_provider(provider)
-        self._client = LLMClient(provider=provider, api_key=api_key, base_url=base_url)
+        self._client = LLMClient(
+            provider=provider, api_key=api_key, base_url=base_url,
+            extra_headers=extra_headers,
+        )
         self._provider = provider
+        self._extra_headers = extra_headers
         self._model = resolve_model(model, provider=provider)
         self._max_tokens = default_max_tokens_for_model(self._model, provider=provider)
 

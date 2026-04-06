@@ -82,19 +82,29 @@ class LLMClient:
         provider: str = _ANTHROPIC_PROVIDER,
         api_key: str | None = None,
         base_url: str | None = None,
+        extra_headers: dict[str, str] | None = None,
     ):
         self.provider = validate_provider(provider)
         self._api_key = api_key
         self._base_url = base_url
+        self._extra_headers = extra_headers
         if self.provider == _OPENAI_PROVIDER:
             if OpenAI is None:
                 message = "OpenAI support requires the `openai` package to be installed."
                 if _OPENAI_IMPORT_ERROR is not None:
                     message += f" Import failed: {_OPENAI_IMPORT_ERROR}"
                 raise ValueError(message)
-            self._client = OpenAI(api_key=api_key, base_url=base_url)
+            self._client = OpenAI(
+                api_key=api_key,
+                base_url=base_url,
+                default_headers=extra_headers or None,
+            )
         else:
-            self._client = anthropic.Anthropic(api_key=api_key, base_url=base_url)
+            self._client = anthropic.Anthropic(
+                api_key=api_key,
+                base_url=base_url,
+                default_headers=extra_headers or None,
+            )
 
     def create_message(
         self,

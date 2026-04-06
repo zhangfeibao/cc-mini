@@ -67,6 +67,8 @@ _ENV_MEMORY_DIR = "CC_MINI_MEMORY_DIR"
 _ENV_PROVIDER = "CC_MINI_PROVIDER"
 _ENV_EFFORT = "CC_MINI_EFFORT"
 _ENV_BUDDY_MODEL = "CC_MINI_BUDDY_MODEL"
+_ENV_EXTRA_HEADERS = "CC_MINI_EXTRA_HEADERS"
+_ENV_PROFILE = "CC_MINI_PROFILE"
 _DEFAULT_CONFIG_PATHS = (
     Path.home() / ".config" / "cc-mini" / "config.toml",
     Path.cwd() / ".cc-mini.toml",
@@ -81,12 +83,15 @@ class AppConfig:
     model: str
     max_tokens: int
     effort: str | None = None
+    extra_headers: dict[str, str] | None = None
     buddy_model: str | None = None
     memory_dir: Path = Path.home() / ".mini-claude" / "memory"
     dream_interval_hours: float = 24.0
     dream_min_sessions: int = 5
     auto_dream: bool = True
     config_paths: tuple[Path, ...] = ()
+    available_profiles: dict[str, dict] | None = None
+    active_profile: str | None = None
 
 
 def resolve_model(model: str | None, provider: str = DEFAULT_PROVIDER) -> str:
@@ -129,8 +134,26 @@ def load_app_config(args: Namespace) -> AppConfig:
     file_values, config_paths = _load_file_values(args.config)
     env_values = _load_env_values()
 
+    # --- Profile resolution ---
+    all_profiles = file_values.get("profiles", {})
+    raw_profile = (
+        getattr(args, "profile", None)
+        or env_values.get("profile")
+        or file_values["top"].get("profile")
+    )
+    profile_values: dict[str, Any] = {}
+    if raw_profile and raw_profile in all_profiles:
+        profile_values = dict(all_profiles[raw_profile])
+
+    # When a profile is active, profile values take priority over env vars
+    # (the user explicitly chose this profile, so it should override defaults).
+    # Priority: CLI > profile (if active) > env > provider-file > top-file
+    has_profile = bool(raw_profile and profile_values)
+
+    # Helper to get value with precedence: CLI > env > profile > provider-file > top-file
     raw_provider = (
         getattr(args, "provider", None)
+        or (profile_values.get("provider") if has_profile else None)
         or env_values.get("provider")
         or file_values["top"].get("provider")
     )
@@ -146,13 +169,30 @@ def load_app_config(args: Namespace) -> AppConfig:
             return file_values["top"][key]
         return selected_provider_values.get(key)
 
-    raw_model = args.model or env_values.get("model") or _file_value("model")
+    def _resolve(key: str, cli_val: Any = None) -> Any:
+        """Resolve a config value with profile-aware precedence."""
+        if cli_val is not None:
+            return cli_val
+        if has_profile:
+            prof_val = profile_values.get(key)
+            if prof_val is not None:
+                return prof_val
+        env_val = env_values.get(key)
+        if env_val is not None:
+            return env_val
+        if not has_profile:
+            prof_val = profile_values.get(key)
+            if prof_val is not None:
+                return prof_val
+        return _file_value(key)
+
+    raw_model = args.model or _resolve("model")
     model = resolve_model(raw_model, provider=provider)
 
     raw_max_tokens = (
         args.max_tokens
         if args.max_tokens is not None
-        else env_values.get("max_tokens", _file_value("max_tokens"))
+        else _resolve("max_tokens")
     )
     max_tokens = _parse_max_tokens(
         raw_max_tokens,
@@ -161,50 +201,77 @@ def load_app_config(args: Namespace) -> AppConfig:
 
     raw_effort = getattr(args, "effort", None)
     if raw_effort is None:
-        raw_effort = env_values.get("effort", _file_value("effort"))
+        raw_effort = _resolve("effort")
     effort = _parse_effort(raw_effort)
 
     raw_buddy_model = getattr(args, "buddy_model", None)
     if raw_buddy_model is None:
-        raw_buddy_model = env_values.get("buddy_model", _file_value("buddy_model"))
+        raw_buddy_model = _resolve("buddy_model")
     buddy_model = resolve_model(raw_buddy_model, provider=provider) if raw_buddy_model else None
 
     raw_memory_dir = (
         getattr(args, "memory_dir", None)
-        or env_values.get("memory_dir")
-        or _file_value("memory_dir")
+        or _resolve("memory_dir")
     )
     memory_dir = Path(raw_memory_dir).expanduser() if raw_memory_dir else Path.home() / ".mini-claude" / "memory"
 
     raw_dream_interval = getattr(args, "dream_interval", None)
     if raw_dream_interval is None:
-        raw_dream_interval = env_values.get("dream_interval_hours", _file_value("dream_interval_hours"))
+        raw_dream_interval = _resolve("dream_interval_hours")
     dream_interval = float(raw_dream_interval) if raw_dream_interval is not None else 24.0
 
     raw_dream_min = getattr(args, "dream_min_sessions", None)
     if raw_dream_min is None:
-        raw_dream_min = env_values.get("dream_min_sessions", _file_value("dream_min_sessions"))
+        raw_dream_min = _resolve("dream_min_sessions")
     dream_min_sessions = int(raw_dream_min) if raw_dream_min is not None else 5
     auto_dream = True
-    raw_auto_dream = env_values.get("auto_dream", _file_value("auto_dream"))
+    raw_auto_dream = _resolve("auto_dream")
     if raw_auto_dream is not None:
         auto_dream = str(raw_auto_dream).lower() not in ("false", "0", "no")
     if getattr(args, "no_auto_dream", False):
         auto_dream = False
 
+    # --- extra_headers resolution: profile > env > provider-file > top-file ---
+    raw_extra_headers = (
+        (profile_values.get("extra_headers") if has_profile else None)
+        or env_values.get("extra_headers")
+        or selected_provider_values.get("extra_headers")
+        or file_values["top"].get("extra_headers")
+    )
+    extra_headers = dict(raw_extra_headers) if isinstance(raw_extra_headers, dict) else None
+
+    # --- api_key resolution: CLI > profile (if active) > env > provider-file ---
+    api_key = args.api_key
+    if not api_key and has_profile:
+        api_key = profile_values.get("api_key")
+    if not api_key:
+        api_key = selected_env_values.get("api_key") or _file_value("api_key")
+    # Auto-fill api_key when extra_headers contains Authorization
+    if not api_key and extra_headers and "Authorization" in extra_headers:
+        api_key = "unused"
+
+    base_url = args.base_url
+    if not base_url and has_profile:
+        base_url = profile_values.get("base_url")
+    if not base_url:
+        base_url = selected_env_values.get("base_url") or _file_value("base_url")
+
     return AppConfig(
         provider=provider,
-        api_key=args.api_key or selected_env_values.get("api_key") or _file_value("api_key"),
-        base_url=args.base_url or selected_env_values.get("base_url") or _file_value("base_url"),
+        api_key=api_key,
+        base_url=base_url,
         model=model,
         max_tokens=max_tokens,
         effort=effort,
+        extra_headers=extra_headers,
         buddy_model=buddy_model or default_companion_model(provider, model),
         memory_dir=memory_dir,
         dream_interval_hours=dream_interval,
         dream_min_sessions=dream_min_sessions,
         auto_dream=auto_dream,
         config_paths=config_paths,
+        available_profiles=all_profiles if all_profiles else None,
+        active_profile=raw_profile if raw_profile and raw_profile in all_profiles else None,
     )
 
 
@@ -212,6 +279,7 @@ def _load_file_values(explicit_path: str | None) -> tuple[dict[str, Any], tuple[
     values: dict[str, Any] = {
         "top": {},
         "providers": {"anthropic": {}, "openai": {}},
+        "profiles": {},
     }
     loaded_paths: list[Path] = []
 
@@ -244,6 +312,7 @@ def _read_config_file(path: Path) -> dict[str, Any]:
     values: dict[str, Any] = {
         "top": {},
         "providers": {"anthropic": {}, "openai": {}},
+        "profiles": {},
     }
 
     for provider in ("anthropic", "openai"):
@@ -251,8 +320,13 @@ def _read_config_file(path: Path) -> dict[str, Any]:
         if isinstance(section, dict):
             values["providers"][provider].update(section)
 
+    profiles = data.get("profiles", {})
+    if isinstance(profiles, dict):
+        values["profiles"].update(profiles)
+
     for key in (
         "provider",
+        "profile",
         "api_key",
         "base_url",
         "model",
@@ -263,6 +337,7 @@ def _read_config_file(path: Path) -> dict[str, Any]:
         "dream_interval_hours",
         "dream_min_sessions",
         "auto_dream",
+        "extra_headers",
     ):
         if key in data:
             values["top"][key] = data[key]
@@ -292,6 +367,10 @@ def _load_env_values() -> dict[str, Any]:
         values["effort"] = os.environ[_ENV_EFFORT]
     if os.getenv(_ENV_BUDDY_MODEL):
         values["buddy_model"] = os.environ[_ENV_BUDDY_MODEL]
+    if os.getenv(_ENV_EXTRA_HEADERS):
+        values["extra_headers"] = _parse_env_headers(os.environ[_ENV_EXTRA_HEADERS])
+    if os.getenv(_ENV_PROFILE):
+        values["profile"] = os.environ[_ENV_PROFILE]
     return values
 
 
@@ -318,6 +397,20 @@ def _parse_effort(raw_value: Any) -> str | None:
     return normalized
 
 
+def _parse_env_headers(raw: str) -> dict[str, str]:
+    """Parse ``Key1:Value1,Key2:Value2`` into a dict."""
+    headers: dict[str, str] = {}
+    for pair in raw.split(","):
+        pair = pair.strip()
+        if ":" in pair:
+            key, value = pair.split(":", 1)
+            key = key.strip()
+            value = value.strip()
+            if key:
+                headers[key] = value
+    return headers
+
+
 def _infer_provider(provider_values: dict[str, dict[str, Any]]) -> str:
     openai_values = provider_values.get("openai", {})
     anthropic_values = provider_values.get("anthropic", {})
@@ -330,6 +423,7 @@ def _merge_file_values(target: dict[str, Any], incoming: dict[str, Any]) -> None
     target["top"].update(incoming.get("top", {}))
     for provider in ("anthropic", "openai"):
         target["providers"][provider].update(incoming.get("providers", {}).get(provider, {}))
+    target.setdefault("profiles", {}).update(incoming.get("profiles", {}))
 
 
 def _provider_env_values(env_values: dict[str, Any], provider: str) -> dict[str, Any]:

@@ -188,6 +188,7 @@ def run_stdio(app_config: AppConfig) -> None:
         provider=app_config.provider,
         api_key=app_config.api_key,
         base_url=app_config.base_url,
+        extra_headers=app_config.extra_headers,
         model=app_config.model,
         max_tokens=app_config.max_tokens,
         effort=app_config.effort,
@@ -200,6 +201,7 @@ def run_stdio(app_config: AppConfig) -> None:
         provider=app_config.provider,
         api_key=app_config.api_key,
         base_url=app_config.base_url,
+        extra_headers=app_config.extra_headers,
     )
     compact_service = CompactService(
         client=llm_client,
